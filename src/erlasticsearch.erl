@@ -132,14 +132,14 @@ registered_pool_name({Host, Port, PoolName}) ->
 %% @doc Start a poolboy instance
 -spec start_pool(pool_name()) -> supervisor:startchild_ret().
 start_pool(PoolName) ->
-    PoolOptions = application:get_env(erlasticsearch, pool_options, ?DEFAULT_POOL_OPTIONS),
-    ConnectionOptions = application:get_env(erlasticsearch, connection_options, ?DEFAULT_CONNECTION_OPTIONS),
+    PoolOptions = get_env(pool_options, ?DEFAULT_POOL_OPTIONS),
+    ConnectionOptions = get_env(connection_options, ?DEFAULT_CONNECTION_OPTIONS),
     start_pool(PoolName, PoolOptions, ConnectionOptions).
 
 %% @doc Start a poolboy instance
 -spec start_pool(pool_name(), params()) -> supervisor:startchild_ret().
 start_pool(PoolName, PoolOptions) when is_list(PoolOptions) ->
-    ConnectionOptions = application:get_env(erlasticsearch, connection_options, ?DEFAULT_CONNECTION_OPTIONS),
+    ConnectionOptions = get_env(connection_options, ?DEFAULT_CONNECTION_OPTIONS),
     start_pool(PoolName, PoolOptions, ConnectionOptions).
 
 %% @doc Start a poolboy instance with appropriate Pool & Conn settings
