@@ -875,19 +875,26 @@ do_request(Connection, {Function, Args}, State) ->
 -spec process_response(boolean(), {ok, rest_response()} | error() | exception()) -> response().
 process_response(_, {error, _} = Response) ->
     Response;
-process_response(true, {ok, #restResponse{status = Status, body = undefined}}) ->
-    [{status, erlang:integer_to_binary(Status)}];
-process_response(false, {ok, #restResponse{status = Status, body = undefined}}) ->
-    [{status, Status}];
-process_response(true, {ok, #restResponse{status = Status, body = Body}}) ->
-    [{status, erlang:integer_to_binary(Status)}, {body, Body}];
-process_response(false, {ok, #restResponse{status = Status, body = Body}}) ->
+process_response(BinaryResponse, {ok, #restResponse{status = Status, body = undefined}}) ->
+    [{status, process_status(BinaryResponse, Status)}];
+process_response(BinaryResponse, {ok, #restResponse{status = Status, body = Body}}) ->
+    [{status, process_status(BinaryResponse, Status)},
+     {body, process_body(BinaryResponse, Body)}].
+
+process_status(true, Status) ->
+    list_to_binary(integer_to_list(Status));
+process_status(false, Status) ->
+    Status.
+
+process_body(true, Body) ->
+    Body;
+process_body(false, Body) ->
     try
-        [{status, Status}, {body, jsx:decode(Body)}]
+    jsx:decode(Body)
     catch
         error:badarg ->
             %% Body was not JSON, decoding failed
-            [{status, Status}, {body, Body}]
+            Body
     end.
 
 %% @doc Build a new rest request
