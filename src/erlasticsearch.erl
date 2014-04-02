@@ -123,7 +123,7 @@ start_link(ConnectionOptions) ->
 %% @doc Name used to register the pool server
 -spec registered_pool_name(pool_name()) -> registered_pool_name().
 registered_pool_name(PoolName) when is_binary(PoolName) ->
-    binary_to_atom(<<?REGISTERED_NAME_PREFIX, PoolName/binary, ".pool">>, utf8);
+    binary_to_atom(<<?REGISTERED_NAME_PREFIX, "__", PoolName/binary, ".pool">>, utf8);
 registered_pool_name({Host, Port, PoolName}) ->
     BHost = binary_host(Host),
     BPort = binary_port(Port),
