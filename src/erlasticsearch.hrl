@@ -35,6 +35,7 @@
 -type destination()     :: server_ref() | fq_server_ref().
 -type pool_name()       :: binary() | fq_server_ref().
 -type target()          :: atom() | pid().
+-type metric()          :: binary().
 
 
 %% Defaults

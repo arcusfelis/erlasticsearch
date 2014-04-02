@@ -34,7 +34,7 @@
 
 % Cluster helpers
 -export([health/1]).
--export([state/1, state/2]).
+-export([state/1, state/2, state/4]).
 -export([nodes_info/1, nodes_info/2, nodes_info/3]).
 -export([nodes_stats/1, nodes_stats/2, nodes_stats/3]).
 
@@ -164,10 +164,21 @@ health(Destination) ->
 state(Destination) ->
     state(Destination, []).
 
-%% @doc Get the state of the  ElasticSearch cluster
+%% @equiv state(Destination, [], [], Params).
 -spec state(destination(), params()) -> response().
 state(Destination, Params) when is_list(Params) ->
-    route_call(Destination, {state, Params}, infinity).
+    state(Destination, [], [], Params).
+
+%% @doc Get the state of the  ElasticSearch cluster
+-spec state(destination(), index() | [index()], metric() | [metric()], params()) -> response().
+state(Destination, Metrics, Index, Params) when is_binary(Index) ->
+    state(Destination, Metrics, [Index], Params);
+state(Destination, Metric, Indexes, Params) when is_binary(Metric) ->
+    state(Destination, [Metric], Indexes, Params);
+state(Destination, Metrics, Indexes, Params) when is_list(Params),
+                                                  is_list(Indexes),
+                                                  is_list(Params) ->
+    route_call(Destination, {state, Metrics, Indexes, Params}, infinity).
 
 %% @equiv nodes_info(Destination, [], []).
 -spec nodes_info(destination()) -> response().
@@ -584,8 +595,8 @@ handle_call({_Request = health}, _From, State = #state{connection = Connection0}
     {Connection1, Response} = process_request(Connection0, RestRequest, State),
     {reply, Response, State#state{connection = Connection1}};
 
-handle_call({_Request = state, Params}, _From, State = #state{connection = Connection0}) ->
-    RestRequest = rest_request_state(Params),
+handle_call({_Request = state, Metrics, Indexes, Params}, _From, State = #state{connection = Connection0}) ->
+    RestRequest = rest_request_state(Metrics, Indexes, Params),
     {Connection1, Response} = process_request(Connection0, RestRequest, State),
     {reply, Response, State#state{connection = Connection1}};
 
@@ -902,10 +913,20 @@ rest_request_health() ->
     #restRequest{method = ?elasticsearch_Method_GET,
                  uri = ?HEALTH}.
 
-rest_request_state(Params) when is_list(Params) ->
-    Uri = make_uri([?STATE], Params),
+rest_request_state(Metrics, Indexes, Params) when is_list(Metrics),
+                                                  is_list(Indexes),
+                                                  is_list(Params) ->
+    MetricList = join_metrics(Metrics),
+    IndexList = join(Indexes, <<",">>),
+    Uri = make_uri([?STATE, MetricList, IndexList], Params),
     #restRequest{method = ?elasticsearch_Method_GET,
                  uri = Uri}.
+
+%% ES fails with request like "_cluster/state//index1,index2"
+join_metrics([]) ->
+    <<"_all">>;
+join_metrics([_|_]=Metrics) ->
+    join(Metrics, <<",">>).
 
 rest_request_nodes_info(NodeNames, Params) when is_list(NodeNames),
                                                 is_list(Params) ->
