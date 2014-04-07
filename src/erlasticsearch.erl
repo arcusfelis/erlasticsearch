@@ -578,16 +578,14 @@ init([PoolName, Options0]) ->
                 {Amount, Options3};
             false -> {1, ConnectionOptions1}
         end,
-    Connection = connection(ConnectionOptions2),
+    self() ! connect,
     {ok, #state{pool_name = PoolName, 
                 binary_response = DecodeResponse,
-                connection_options = ConnectionOptions,
-                connection = Connection,
+                connection_options = ConnectionOptions2,
                 retries_left = RetryAmount,
                 retry_interval = RetryInterval}}.
 
 handle_call({stop}, _From, State) ->
-    thrift_client:close(State#state.connection),
     {stop, normal, ok, State};
 
 handle_call({_Request = health}, _From, State = #state{connection = Connection0}) ->
@@ -766,19 +764,21 @@ handle_call({_Request = get_alias, Index, Alias}, _From, State = #state{connecti
     {reply, Response, State#state{connection = Connection1}};
 
 handle_call(_Request, _From, State) ->
-    thrift_client:close(State#state.connection),
     {stop, unhandled_call, State}.
 
 handle_cast(_Request, State) ->
-    thrift_client:close(State#state.connection),
     {stop, unhandled_info, State}.
 
+handle_info(connect, State = #state{connection = undefined, connection_options = ConnectionOptions}) ->
+    Connection = connection(ConnectionOptions),
+    {noreply, State#state{connection = Connection}};
 handle_info(_Info, State) ->
-    thrift_client:close(State#state.connection),
     {stop, unhandled_info, State}.
 
-terminate(_Reason, State) ->
-    thrift_client:close(State#state.connection),
+terminate(_Reason, #state{connection = undefined}) ->
+    ok;
+terminate(_Reason, #state{connection = Connection}) ->
+    thrift_client:close(Connection),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -790,6 +790,37 @@ code_change(_OldVsn, State, _Extra) ->
 %% @doc Build a new connection
 -spec connection(params()) -> connection().
 connection(ConnectionOptions) ->
+    ThriftServers = proplists:get_value(thrift_servers, ConnectionOptions, []),
+    case ThriftServers of
+        [] ->
+            simple_connection(ConnectionOptions);
+        [_|_] ->
+            random_connection(ThriftServers, ConnectionOptions)
+    end.
+
+random_connection(ThriftServers, ConnectionOptions) ->
+    ThriftOptions = case lists:keyfind(thrift_options, 1, ConnectionOptions) of
+        {thrift_options, Options} -> Options;
+        false -> []
+    end,
+    ShuffledThriftServers = shuffle(ThriftServers),
+    first_succeed_connection(ShuffledThriftServers, ThriftOptions).
+
+first_succeed_connection([{ThriftHost, ThriftPort}|Servers], ThriftOptions) ->
+    try thrift_client_util:new(ThriftHost, ThriftPort, elasticsearch_thrift, ThriftOptions) of
+        {ok, Connection} ->
+            Connection;
+        {error, _} ->
+            first_succeed_connection(Servers, ThriftOptions)
+        catch Class:Reason ->
+            error_logger:error_msg("Connection failed to ~p:~p because ~p:~p",
+                [ThriftHost, ThriftPort, Class, Reason]),
+            first_succeed_connection(Servers, ThriftOptions)
+    end;
+first_succeed_connection([], _) ->
+    exit(all_dead).
+
+simple_connection(ConnectionOptions) ->
     ThriftHost = proplists:get_value(thrift_host, ConnectionOptions, ?DEFAULT_THRIFT_HOST),
     ThriftPort = proplists:get_value(thrift_port, ConnectionOptions, ?DEFAULT_THRIFT_PORT),
     ThriftOptions = case lists:keyfind(thrift_options, 1, ConnectionOptions) of
@@ -799,6 +830,11 @@ connection(ConnectionOptions) ->
     {ok, Connection} = thrift_client_util:new(ThriftHost, ThriftPort, elasticsearch_thrift, ThriftOptions),
     Connection.
 
+reconnect(Connection, State=#state{connection_options = ConnectionOptions}) ->
+    catch thrift_client:close(Connection),
+    NewConnection = connection(ConnectionOptions),
+    NewState = State#state{connection_options = NewConnection},
+    {NewConnection, NewState}.
 
 %% @doc Sets the value of the configuration parameter Key for this application.
 -spec set_env(Key :: atom(), Value :: term()) -> ok.
@@ -850,8 +886,8 @@ error_or_retry({error, Reason}, Connection,
        andalso (Reason =:= closed orelse Reason =:= econnrefused) ->
     timer:sleep(W),
     ShorterRetryState = update_reconnect_state(State),
-    thrift_client:close(Connection),
-    process_request(undefined, Request, ShorterRetryState);
+    {NewConnection, NewState} = reconnect(Connection, ShorterRetryState),
+    process_request(NewConnection, Request, NewState);
 error_or_retry(Error, _Connection, _Request, _State) ->
     Error.
     
@@ -1282,3 +1318,10 @@ binary_host(undefined) -> <<"">>.
 %% If thrift port is passed in, use it
 binary_port(Port) when is_integer(Port) -> list_to_binary(integer_to_list(Port));
 binary_port(undefined) -> <<"">>.
+
+shuffle(List) ->
+    random:seed(now()),
+    WithKey = [ {random:uniform(), X} || X <- List ],
+    Sorted = lists:keysort(1, WithKey),
+    [X || {_, X} <- Sorted].
+

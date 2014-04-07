@@ -76,7 +76,7 @@ init([]) ->
 pool_spec({Host, Port, _} = PoolName, PoolOptions, ConnectionOptions) ->
     PoolId = erlasticsearch:registered_pool_name(PoolName),
     PoolArgs = [{name, {local, PoolId}},
-                {worker_module, erlasticsearch_poolboy_worker}] ++ PoolOptions,
+                {worker_module, erlasticsearch}] ++ PoolOptions,
     ConnectionArgs = sanitize_connection_options(thrift_host(Host),
                                                  thrift_port(Port),
                                                  ConnectionOptions),
